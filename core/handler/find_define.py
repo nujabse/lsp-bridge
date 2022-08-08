@@ -24,7 +24,7 @@ class FindDefine(Handler):
 
         if file_uri.startswith("jdt://"):
             # for java
-            self.file_action.handlers["jdt_uri_resolver"].send_request(file_uri, start_pos)
+            self.file_action.send_server_request(self.file_action.single_server, "jdt_uri_resolver", file_uri, start_pos)
         elif file_uri.startswith("csharp://"):
             # for csharp
             raise NotImplementedError()
@@ -34,9 +34,5 @@ class FindDefine(Handler):
         else:
             # for normal file uri
             filepath = uri_to_path(file_uri)
-            self.file_action.lsp_bridge.create_file_action(
-                filepath=filepath,
-                lang_server_info=self.file_action.lang_server_info,
-                lsp_server=self.file_action.lsp_server,
-            )
+            self.file_action.create_external_file_action(filepath)
             eval_in_emacs("lsp-bridge--jump-to-def", filepath, start_pos)

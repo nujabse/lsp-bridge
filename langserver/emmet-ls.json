@@ -1,8 +1,8 @@
 {
-  "name": "vscode-html-language-server",
+  "name": "emmet-ls",
   "languageId": "html",
   "command": [
-    "vscode-html-language-server",
+    "emmet-ls",
     "--stdio"
   ],
   "settings": {}

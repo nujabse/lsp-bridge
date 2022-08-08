@@ -140,6 +140,9 @@
     ("translate" . ("material" "translate" "#98c807"))
     ("emmet abbreviation" . ("material" "expand-all-outline" "#98c807"))
     ("custom" . ("material" "apple-keyboard-option" "#ed6856"))
+    ("special form" . ("material" "function-variant" "#0abf53"))
+    ("feature" . ("material" "sim-outline" "#00c4cc"))
+    ("at" . ("material" "at" "#0085c3"))
     (t . ("material" "file-find-outline" "#90cef1"))))
 
 (defvar acm-icon-cache (make-hash-table :test 'equal))

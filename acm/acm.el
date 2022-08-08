@@ -97,6 +97,8 @@
 (require 'acm-backend-path)
 (require 'acm-backend-search-words)
 (require 'acm-backend-tempel)
+(require 'acm-backend-telega)
+(require 'acm-quick-access)
 
 ;;; Code:
 
@@ -112,11 +114,15 @@
   :type '(repeat (choice regexp symbol)))
 
 (defcustom acm-enable-doc t
-  "Popup documentation when this option is turn on."
+  "Popup documentation automatically when this option is turn on."
   :type 'boolean)
 
 (defcustom acm-enable-icon t
   "Show icon in completion menu."
+  :type 'boolean)
+
+(defcustom acm-enable-quick-access nil
+  "Show quick-access in completion menu."
   :type 'boolean)
 
 (defcustom acm-snippet-insert-index 8
@@ -132,6 +138,9 @@
                  (const orderless-regexp)
                  (const orderless-initialism)))
 
+(defcustom acm-doc-frame-max-lines 20
+  "Max line lines of doc frame."
+  :type 'integer)
 
 (cl-defmacro acm-run-idle-func (timer idle func)
   `(unless ,timer
@@ -153,10 +162,12 @@
     (define-key map "\n" #'acm-complete)
     (define-key map "\M-h" #'acm-complete)
     (define-key map "\M-H" #'acm-insert-common)
+    (define-key map "\M-d" #'acm-doc-toggle)
     (define-key map "\M-j" #'acm-doc-scroll-up)
     (define-key map "\M-k" #'acm-doc-scroll-down)
     (define-key map "\M-l" #'acm-hide)
     (define-key map "\C-g" #'acm-hide)
+    (acm-keymap--bind-quick-access map)
     map)
   "Keymap used when popup is shown.")
 
@@ -267,16 +278,7 @@
                    (desktop-dont-save . t)
                    )))
 
-    ;; Set frame border color.
-    (let* ((face (if (facep 'child-frame-border) 'child-frame-border 'internal-border))
-           (new (face-attribute 'acm-border-face :background nil 'default)))
-      (unless (equal (face-attribute face :background frame 'default) new)
-        (set-face-background face new frame)))
-
-    ;; Set frame background color.
-    (let ((new (face-attribute 'acm-default-face :background nil 'default)))
-      (unless (equal (frame-parameter frame 'background-color) new)
-        (set-frame-parameter frame 'background-color new)))
+    (acm-set-frame-colors frame)
 
     ;; Reset to the input focus to the parent frame.
     (redirect-frame-focus frame parent)
@@ -431,12 +433,14 @@ influence of C1 on the result."
         (setq mode-candidates (append
                                (acm-backend-elisp-candidates keyword)
                                (acm-backend-lsp-candidates keyword)
-                               (acm-backend-search-words-candidates keyword)))
+                               (acm-backend-search-words-candidates keyword)
+			       (acm-backend-telega-candidates keyword)))
 
         ;; Don't search snippet if char before keyword is not in `acm-backend-lsp-completion-trigger-characters'.
-        (unless (member char-before-keyword acm-backend-lsp-completion-trigger-characters)
-          (setq yas-candidates (acm-backend-yas-candidates keyword))
-          (setq tempel-candidates (acm-backend-tempel-candidates keyword)))
+        (when (and (boundp 'acm-backend-lsp-completion-trigger-characters))
+          (unless (member char-before-keyword acm-backend-lsp-completion-trigger-characters)
+            (setq yas-candidates (acm-backend-yas-candidates keyword))
+            (setq tempel-candidates (acm-backend-tempel-candidates keyword))))
 
         ;; Insert snippet candidates in first page of menu.
         (setq candidates
@@ -466,9 +470,7 @@ influence of C1 on the result."
            (not (string-equal "Emmet Abbreviation" (plist-get (nth 0 candidates) :annotation))))
       (acm-hide))
      ((> (length candidates) 0)
-      (let* ((menu-old-cache (cons acm-menu-max-length-cache acm-menu-number-cache))
-             (is-dark-mode (string-equal (acm-get-theme-mode) "dark"))
-             (blend-background (if is-dark-mode "#000000" "#AAAAAA")))
+      (let* ((menu-old-cache (cons acm-menu-max-length-cache acm-menu-number-cache)))
         ;; Enable acm-mode to inject mode keys.
         (acm-mode 1)
 
@@ -484,16 +486,8 @@ influence of C1 on the result."
         (setq-local acm-menu-index (if (zerop (length acm-menu-candidates)) -1 0))
         (setq-local acm-menu-offset 0)
 
-        ;; Make sure font size of frame same as Emacs.
-        (set-face-attribute 'acm-buffer-size-face nil :height (face-attribute 'default :height))
-
-        ;; Make sure menu follow the theme of Emacs.
-        (when (equal (face-attribute 'acm-default-face :background) 'unspecified)
-          (set-face-background 'acm-default-face (acm-color-blend (face-attribute 'default :background) blend-background (if is-dark-mode 0.8 0.9))))
-        (when (equal (face-attribute 'acm-select-face :background) 'unspecified)
-          (set-face-background 'acm-select-face (acm-color-blend (face-attribute 'default :background) blend-background 0.6)))
-        (when (equal (face-attribute 'acm-select-face :foreground) 'unspecified)
-          (set-face-foreground 'acm-select-face (face-attribute 'font-lock-function-name-face :foreground)))
+        ;; Init colors.
+        (acm-init-colors)
 
         ;; Record menu popup position and buffer.
         (setq acm-frame-popup-point (or (car bounds) (point)))
@@ -506,12 +500,7 @@ influence of C1 on the result."
           ;; We need delete frame first when user switch to different frame.
           (when (and (frame-live-p acm-frame)
                      (not (eq (frame-parent acm-frame) (selected-frame))))
-            (delete-frame acm-frame)
-            (setq acm-frame nil)
-
-            (when (frame-live-p acm-doc-frame)
-              (delete-frame acm-doc-frame)
-              (setq acm-doc-frame nil)))
+            (acm-delete-frames))
 
           ;; Create menu frame if it not exists.
           (acm-create-frame-if-not-exist acm-frame acm-buffer "acm frame")
@@ -521,6 +510,54 @@ influence of C1 on the result."
         ))
      (t
       (acm-hide)))))
+
+(defun acm-delete-frames ()
+  (when (frame-live-p acm-frame)
+    (delete-frame acm-frame)
+    (setq acm-frame nil))
+
+  (when (frame-live-p acm-doc-frame)
+    (delete-frame acm-doc-frame)
+    (setq acm-doc-frame nil)))
+
+(defun acm-init-colors (&optional force)
+  (let* ((is-dark-mode (string-equal (acm-get-theme-mode) "dark"))
+         (blend-background (if is-dark-mode "#000000" "#AAAAAA")))
+    ;; Make sure font size of frame same as Emacs.
+    (set-face-attribute 'acm-buffer-size-face nil :height (face-attribute 'default :height))
+
+    ;; Make sure menu follow the theme of Emacs.
+    (when (or force (equal (face-attribute 'acm-default-face :background) 'unspecified))
+      (set-face-background 'acm-default-face (acm-color-blend (face-attribute 'default :background) blend-background (if is-dark-mode 0.8 0.9))))
+    (when (or force (equal (face-attribute 'acm-select-face :background) 'unspecified))
+      (set-face-background 'acm-select-face (acm-color-blend (face-attribute 'default :background) blend-background 0.6)))
+    (when (or force (equal (face-attribute 'acm-select-face :foreground) 'unspecified))
+      (set-face-foreground 'acm-select-face (face-attribute 'font-lock-function-name-face :foreground)))))
+
+(defun acm-set-frame-colors (frame)
+  ;; Set frame border color.
+  (let* ((face (if (facep 'child-frame-border) 'child-frame-border 'internal-border))
+         (new (face-attribute 'acm-border-face :background nil 'default)))
+    (unless (equal (face-attribute face :background frame 'default) new)
+      (set-face-background face new frame)))
+
+  ;; Set frame background color.
+  (let ((new (face-attribute 'acm-default-face :background nil 'default)))
+    (unless (equal (frame-parameter frame 'background-color) new)
+      (set-frame-parameter frame 'background-color new))))
+
+(defun acm-reset-colors (&rest args)
+  ;; Reset colors.
+  (acm-init-colors t)
+
+  ;; Reset frame colors.
+  (when (acm-frame-visible-p acm-frame)
+    (acm-set-frame-colors acm-frame)
+    (acm-menu-render (cons acm-menu-max-length-cache acm-menu-number-cache)))
+  (when (acm-frame-visible-p acm-doc-frame)
+    (acm-set-frame-colors acm-doc-frame)))
+
+(advice-add #'load-theme :after #'acm-reset-colors)
 
 (defun acm-frame-get-popup-position ()
   (let* ((edges (window-pixel-edges))
@@ -635,6 +672,7 @@ influence of C1 on the result."
              (annotation-text (if annotation annotation ""))
              (item-length (funcall acm-string-width-function annotation-text))
              (icon-text (if icon (acm-icon-build (nth 0 icon) (nth 1 icon) (nth 2 icon)) ""))
+             (quick-access-key (nth item-index acm-quick-access-keys))
              candidate-line)
 
         ;; Render deprecated candidate.
@@ -645,6 +683,8 @@ influence of C1 on the result."
         (setq candidate-line
               (concat
                icon-text
+               (when acm-enable-quick-access
+                 (if quick-access-key (concat quick-access-key ". ") "   "))
                candidate
                ;; Fill in the blank according to the maximum width, make sure marks align right of menu.
                (propertize " "
@@ -741,7 +781,8 @@ influence of C1 on the result."
     ;; Make sure doc frame size not out of Emacs area.
     (acm-set-frame-size acm-doc-frame
                         (ceiling (/ acm-doc-frame-max-width (frame-char-width)))
-                        (ceiling (/ acm-doc-frame-max-height (window-default-line-height))))
+                        (min (ceiling (/ acm-doc-frame-max-height (window-default-line-height)))
+                             acm-doc-frame-max-lines))
 
     ;; Adjust doc frame with it's size.
     (let* ((acm-doc-frame-width (frame-pixel-width acm-doc-frame))
@@ -872,6 +913,20 @@ influence of C1 on the result."
     (when (framep acm-frame)
       (with-selected-frame acm-doc-frame
         (scroll-down-command)))))
+
+(defun acm-doc-toggle ()
+  "Toggle documentation preview for selected candidate."
+  (interactive)
+  (if (acm-frame-visible-p acm-doc-frame)
+      (acm-doc-hide)
+    (let ((acm-enable-doc t))
+      (acm-doc-show))))
+
+;; Emacs 28: Do not show Acm commands with M-X
+(dolist (sym '(acm-hide acm-complete acm-select-first acm-select-last acm-select-next
+               acm-select-prev acm-insert-common acm-doc-scroll-up acm-doc-scroll-down
+               acm-complete-quick-access acm-doc-toggle))
+  (put sym 'completion-predicate #'ignore))
 
 (provide 'acm)
 

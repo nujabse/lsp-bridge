@@ -6,8 +6,10 @@ class CodeAction(Handler):
     name = "code_action"
     method = "textDocument/codeAction"
     cancel_on_change = True
+    provider = "code_action_provider"
+    provider_message = "Current server not support code action."
 
-    def process_request(self, range_start, range_end, diagnostics, action_kind) -> dict:
+    def process_request(self, range_start, range_end, action_kind) -> dict:
         self.action_kind = action_kind
         
         range = {
@@ -15,24 +17,18 @@ class CodeAction(Handler):
             "end": range_end
         }
         
-        match_diagnostic = []
-        for diagnostic in diagnostics:
-            if (range["start"]["line"] >= diagnostic["range"]["start"]["line"] and 
-                range["start"]["character"] >= diagnostic["range"]["start"]["character"] and 
-                range["end"]["line"] <= diagnostic["range"]["end"]["line"] and 
-                range["end"]["character"] <= diagnostic["range"]["end"]["character"]):
-                match_diagnostic.append(diagnostic)
-        
+        diagnostics = self.file_action.diagnostics
+                
         if isinstance(action_kind, str):
             context = {
-                "diagnostics": match_diagnostic,
+                "diagnostics": diagnostics,
                 "only": [action_kind]
             }
         else:
             context = {
-                "diagnostics": match_diagnostic
+                "diagnostics": diagnostics
             }
-        
+            
         return dict(range=range, context=context)
 
     def process_response(self, response) -> None:

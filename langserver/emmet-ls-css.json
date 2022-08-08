@@ -1,8 +1,8 @@
 {
-  "name": "vscode-css-language-server",
+  "name": "emmet-ls-css",
   "languageId": "css",
   "command": [
-    "vscode-css-language-server",
+    "emmet-ls",
     "--stdio"
   ],
   "settings": {}

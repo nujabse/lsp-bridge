@@ -91,20 +91,22 @@ class LspServerSender(Thread):
         logger.debug(json.dumps(message, indent=3))
 
     def run(self) -> None:
-        # send "initialize" request
-        self._send_message(self.init_queue.get())
-        # wait until initialized
-        self.initialized.wait()
-        # send other initialization-related messages
-        while not self.init_queue.empty():
-            message = self.init_queue.get()
-            self._send_message(message)
-        # send all others
-        while self.process.poll() is None:
-            message = self.queue.get()
-            self._send_message(message)
-
-
+        try:
+            # send "initialize" request
+            self._send_message(self.init_queue.get())
+            # wait until initialized
+            self.initialized.wait()
+            # send other initialization-related messages
+            while not self.init_queue.empty():
+                message = self.init_queue.get()
+                self._send_message(message)
+            # send all others
+            while self.process.poll() is None:
+                message = self.queue.get()
+                self._send_message(message)
+        except:
+            logger.error(traceback.format_exc())
+            
 class LspServerReceiver(Thread):
 
     def __init__(self, process: subprocess.Popen):
@@ -123,23 +125,23 @@ class LspServerReceiver(Thread):
             # Send message.
             self.queue.put({
                 "name": "lsp_recv_message",
-                "content": json.loads(line)
+                "content": parse_json_content(line)
             })
         except:
             logger.error(traceback.format_exc())
 
     def run(self):
-        content_length = None
-        buffer = bytearray()
-        while self.process.poll() is None:
-            try:
+        try:
+            content_length = None
+            buffer = bytearray()
+            while self.process.poll() is None:
                 if content_length is None:
                     match = re.search(b"Content-Length: [0-9]+\r\n\r\n", buffer)
                     if match is not None:
                         end = match.end()
                         parts = match.group(0).decode("utf-8").strip().split(": ")
                         content_length = int(parts[1])
-
+            
                         buffer = buffer[end:]
                     else:
                         line = self.process.stdout.readline()    # type: ignore
@@ -165,13 +167,12 @@ class LspServerReceiver(Thread):
                         buffer = buffer[content_length:]
                         content_length = None
                         self.emit_message(msg.decode("utf-8"))
-            except:
-                logger.error(traceback.format_exc())
-        logger.info("\n--- Lsp server exited, exit code: {}".format(self.process.returncode))
-        logger.info(self.process.stdout.read())    # type: ignore
-        if self.process.stderr:
-            logger.info(self.process.stderr.read())
-
+            logger.info("\n--- Lsp server exited, exit code: {}".format(self.process.returncode))
+            logger.info(self.process.stdout.read())    # type: ignore
+            if self.process.stderr:
+                logger.info(self.process.stderr.read())
+        except:
+            logger.error(traceback.format_exc())
 
 class LspServer:
     def __init__(self, message_queue, project_path, server_info, server_name):
@@ -236,12 +237,12 @@ class LspServer:
         self.send_did_open_notification(fa.filepath, fa.external_file_link)
 
     def lsp_message_dispatcher(self):
-        while True:
-            message = self.receiver.get_message()
-            try:
+        try:
+            while True:
+                message = self.receiver.get_message()
                 self.handle_recv_message(message["content"])
-            except:
-                logger.error(traceback.format_exc())
+        except:
+            logger.error(traceback.format_exc())
 
     def send_initialize_request(self):
         logger.info("\n--- Send initialize for {} ({})".format(self.project_path, self.server_info["name"]))
@@ -405,7 +406,19 @@ class LspServer:
             logger.error("\n--- Recv message (error):")
             logger.error(json.dumps(message, indent=3))
             
-            message_emacs(message["error"]["message"])
+            error_message = message["error"]["message"]
+            if error_message == "Unhandled method completionItem/resolve":
+                self.completion_resolve_provider = False
+            elif error_message == "Unhandled method textDocument/prepareRename":
+                self.rename_prepare_provider = False
+            elif error_message == "Unhandled method textDocument/codeAction":
+                self.code_action_provider = False
+            elif error_message == "Unhandled method textDocument/formatting":
+                self.code_format_provider = False
+            elif error_message == "Unhandled method textDocument/signatureHelp":
+                self.signature_help_provider = False
+            else:
+                message_emacs(error_message)
             
             return
 
@@ -417,9 +430,9 @@ class LspServer:
                 # server response
                 if message["id"] in self.request_dict:
                     method = self.request_dict[message["id"]].method
-                    logger.info("\n--- Recv response ({}): {}".format(message["id"], method))
+                    logger.info("\n--- Recv response {} ({}): {}".format(self.server_info["name"], message["id"], method))
                 else:
-                    logger.info("\n--- Recv response ({})".format(message["id"]))
+                    logger.info("\n--- Recv response {} ({})".format(self.server_info["name"], message["id"]))
         else:
             if "method" in message:
                 # server notification
@@ -500,12 +513,7 @@ class LspServer:
                     if message["method"] == "workspace/configuration":
                         self.handle_workspace_configuration_request(message["method"], message["id"], message["params"])
                     elif message["method"] == "workspace/applyEdit":
-                        changes = []
-                        
-                        for change_info in message["params"]["edit"]["documentChanges"]:
-                            changes.append([uri_to_path(change_info["textDocument"]["uri"]), change_info["edits"]])
-                        
-                        eval_in_emacs("lsp-bridge-workspace-apply-edit", changes)
+                        eval_in_emacs("lsp-bridge-workspace-apply-edit", message["params"]["edit"])
 
     def close_file(self, filepath):
         # Send didClose notification when client close file.

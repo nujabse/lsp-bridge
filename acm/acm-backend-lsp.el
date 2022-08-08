@@ -96,29 +96,30 @@
   "Whether to enable auto-import."
   :type 'boolean)
 
-(defvar-local acm-backend-lsp-completion-trigger-characters nil)
-(defvar-local acm-backend-lsp-completion-position nil)
-(defvar-local acm-backend-lsp-filepath "")
-(defvar-local acm-backend-lsp-items nil)
-
 (defvar acm-backend-lsp-fetch-completion-item-func nil)
 
 (defun acm-backend-lsp-candidates (keyword)
   (let* ((candidates (list)))
-    (when (and acm-backend-lsp-items
-               (hash-table-p acm-backend-lsp-items))
-      (maphash
-       (lambda (k v)
-         (let ((candidate-label (plist-get v :label)))
-           (when (or (string-equal keyword "")
-                     (acm-candidate-fuzzy-search keyword candidate-label))
-             (if (> (length candidate-label) acm-backend-lsp-candidate-max-length)
-                 (plist-put v :display-label (format "%s ..." (substring candidate-label 0 acm-backend-lsp-candidate-max-length)))
-               (plist-put v :display-label candidate-label))
+    (when (and
+           (boundp 'acm-backend-lsp-items)
+           acm-backend-lsp-items
+           (boundp 'acm-backend-lsp-server-names)
+           acm-backend-lsp-server-names
+           (hash-table-p acm-backend-lsp-items))
+      ;; Sort multi-server items by 
+      (dolist (server-name acm-backend-lsp-server-names)
+        (when-let* ((server-items (gethash server-name acm-backend-lsp-items)))
+          (maphash (lambda (k v)
+                     (let ((candidate-label (plist-get v :label)))
+                       (when (or (string-equal keyword "")
+                                 (acm-candidate-fuzzy-search keyword candidate-label))
+                         (if (> (length candidate-label) acm-backend-lsp-candidate-max-length)
+                             (plist-put v :display-label (format "%s ..." (substring candidate-label 0 acm-backend-lsp-candidate-max-length)))
+                           (plist-put v :display-label candidate-label))
 
-             (plist-put v :backend "lsp")
-             (add-to-list 'candidates v t))))
-       acm-backend-lsp-items))
+                         (plist-put v :backend "lsp")
+                         (add-to-list 'candidates v t))))
+                   server-items))))
 
     (acm-candidate-sort-by-prefix keyword candidates)))
 
@@ -207,9 +208,14 @@ If optional MARKER, return a marker instead"
       (if marker (copy-marker (point-marker)) (point)))))
 
 (defun acm-backend-lsp-apply-text-edits (edits)
-  (dolist (edit edits)
+  (dolist (edit (acm-backend-lsp-sort-edits edits))
     (let* ((range (plist-get edit :range)))
       (acm-backend-lsp-insert-new-text (plist-get range :start) (plist-get range :end) (plist-get edit :newText)))))
+
+(defun acm-backend-lsp-sort-edits (edits)
+  (sort edits #'(lambda (edit-a edit-b)
+                  (> (acm-backend-lsp-position-to-point (plist-get (plist-get edit-a :range) :start))
+                     (acm-backend-lsp-position-to-point (plist-get (plist-get edit-b :range) :start))))))
 
 (defun acm-backend-lsp-snippet-expansion-fn ()
   "Compute a function to expand snippets.
