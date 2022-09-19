@@ -358,7 +358,6 @@ Then LSP-Bridge will start by gdb, please send new issue with `*lsp-bridge*' buf
     ((fortran-mode f90-mode) . "fortls")
     (nix-mode . "rnix-lsp")
     (ess-r-mode . "rlanguageserver"))
-  )
   "The lang server rule for file mode."
   :type 'cons)
 

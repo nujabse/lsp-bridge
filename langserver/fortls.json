@@ -1,6 +1,7 @@
 {
   "name": "fortls",
   "languageId": "fortran",
-  "command": ["fortls"],
-  "settings": {}
+  "command": ["fortls", "--lowercase_intrinsics"],
+  "settings": {
+  }
 }
