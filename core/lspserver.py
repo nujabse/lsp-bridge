@@ -167,6 +167,8 @@ class LspServerReceiver(Thread):
                         buffer = buffer[content_length:]
                         content_length = None
                         self.emit_message(msg.decode("utf-8"))
+                if self.process.stderr:
+                    logger.info(self.process.stderr.read())
             logger.info("\n--- Lsp server exited, exit code: {}".format(self.process.returncode))
             logger.info(self.process.stdout.read())    # type: ignore
             if self.process.stderr:
@@ -183,6 +185,7 @@ class LspServer:
         self.server_name = server_name
         self.request_dict: Dict[int, Handler] = dict()
         self.root_path = self.project_path
+        self.worksplace_folder = None
 
         # LSP server information.
         self.completion_trigger_characters = list()
@@ -199,6 +202,7 @@ class LspServer:
             "refactor.rewrite",
             "source",
             "source.organizeImports"]
+        self.text_document_sync = 2 # refer TextDocumentSyncKind. Can be None = 0, Full = 1 or Incremental = 2
 
         # Start LSP server.
         self.lsp_subprocess = subprocess.Popen(self.server_info["command"], bufsize=DEFAULT_BUFFER_SIZE, stdin=PIPE, stdout=PIPE, stderr=stderr)
@@ -247,6 +251,14 @@ class LspServer:
     def send_initialize_request(self):
         logger.info("\n--- Send initialize for {} ({})".format(self.project_path, self.server_info["name"]))
         
+        initialize_options = self.server_info.get("initializationOptions", {})
+        if os.name == 'nt':
+            if 'typescript' in initialize_options.keys():
+                if 'serverPath' in initialize_options['typescript'].keys():
+                    initialize_options['typescript']['serverPath'] = windows_parse_path(initialize_options['typescript']['serverPath'])
+
+        self.worksplace_folder = get_emacs_func_result("get-workspace-folder", self.project_path)
+
         self.sender.send_request("initialize", {
             "processId": os.getpid(),
             "rootPath": self.root_path,
@@ -256,7 +268,7 @@ class LspServer:
             },
             "rootUri": path_to_uri(self.project_path),
             "capabilities": self.get_capabilities(),
-            "initializationOptions": self.server_info.get("initializationOptions", {})
+            "initializationOptions": initialize_options
         }, self.initialize_id, init=True)
 
     def get_capabilities(self):
@@ -300,7 +312,26 @@ class LspServer:
             }
         })
 
+        if type(self.worksplace_folder) == str:
+            merge_capabilites = merge(merge_capabilites, {
+                "workspace": {
+                     "workspaceFolders": True
+                }
+            })
+
         return merge_capabilites
+
+    def get_initialization_options(self):
+        initialization_options = self.server_info.get("initializationOptions", {})
+
+        if type(self.worksplace_folder) == str:
+            initialization_options = merge(initialization_options, {
+                "workspaceFolders": [
+                    self.worksplace_folder
+                ]
+            })
+
+        return initialization_options
 
     def parse_document_uri(self, filepath, external_file_link):
         """If FileAction include external_file_link return by LSP server, such as jdt.
@@ -319,7 +350,7 @@ class LspServer:
         return uri
 
     def send_did_open_notification(self, filepath, external_file_link=None):
-        with open(filepath, encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
             self.sender.send_notification("textDocument/didOpen", {
                 "textDocument": {
                     "uri": self.parse_document_uri(filepath, external_file_link),
@@ -372,6 +403,22 @@ class LspServer:
             ]
         })
 
+    def send_whole_change_notification(self, filepath, version, file_content=None):
+        if not file_content:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
+                file_content = f.read()
+        self.sender.send_notification("textDocument/didChange", {
+            "textDocument": {
+                "uri": path_to_uri(filepath),
+                "version": version
+            },
+            "contentChanges": [
+                {
+                    "text": file_content
+                }
+            ]
+        })
+
     def record_request_id(self, request_id: int, handler: Handler):
         self.request_dict[request_id] = handler
 
@@ -383,11 +430,11 @@ class LspServer:
 
     def get_server_workspace_change_configuration(self):
         return {
-            "settings": self.server_info["settings"]
+            "settings": self.server_info.get("settings", {})
         }
 
     def handle_workspace_configuration_request(self, name, request_id, params):
-        settings = self.server_info.get("settings", {})            
+        settings = self.server_info.get("settings", {})
         
         # We send empty message back to server if nothing in 'settings' of server.json file.
         if len(settings) == 0:
@@ -485,7 +532,16 @@ class LspServer:
                     self.signature_help_provider = message["result"]["capabilities"]["signatureHelpProvider"]
                 except Exception:
                     pass
-                
+
+                try:
+                    text_document_sync = message["result"]["capabilities"]["textDocumentSync"]
+                    if type(text_document_sync) is int:
+                        self.text_document_sync = text_document_sync
+                    elif type(text_document_sync) is dict:
+                        self.text_document_sync = text_document_sync["change"]
+                except Exception:
+                    pass
+
                 self.sender.send_notification("initialized", {}, init=True)
 
                 # STEP 3: Configure LSP server parameters.

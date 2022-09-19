@@ -10,8 +10,10 @@ lsp-bridge使用Python多线程技术在Emacs和LSP服务器之间构建高速�
 
 ## 安装
 
-1. 安装Python依赖: [python-epc](https://github.com/tkf/python-epc)
-2. 安装[orjson](https://github.com/ijl/orjson) (可选， 依赖Rust)， JSON解析性能会提升150%~200%
+1. 安装Emacs 28及以上版本
+2. 安装Python依赖:
++ [python-epc](https://github.com/tkf/python-epc)
++ [orjson](https://github.com/ijl/orjson)
 3. 安装Elisp依赖:
 + [posframe](https://github.com/tumashu/posframe)
 + [markdown-mode](https://github.com/jrblevin/markdown-mode)
@@ -79,13 +81,21 @@ lsp-bridge开箱即用， 安装好语言对应的[LSP服务器](https://github.
 * `lsp-bridge-python-lsp-server`: Python语言的服务器，可以选择`pyright`或者`jedi`
 * `lsp-bridge-tex-lsp-server`: LaTeX语言的服务器，可以选择`texlab`或者`digestif`
 * `lsp-bridge-complete-manually`: 只有当用户手动调用 `lsp-bridge-popup-complete` 命令的时候才弹出补全菜单， 默认关闭
+* `lsp-bridge-get-workspace-folder`: 在Java中需要把多个项目放到一个Workspace目录下， 才能正常进行定义跳转， 可以自定义这个函数， 函数输入是项目路径， 返回对应的Workspace目录
 * `acm-backend-lsp-enable-auto-import`: 支持自动导入， 默认打开
 * `acm-candidate-match-function`: 补全菜单匹配算法， orderless-* 开头的算法需要额外安装 [orderless](https://github.com/oantolin/orderless)
+* `acm-enable-search-words`: 补全菜单是否显示打开文件的单词， 默认打开
 * `acm-enable-doc`: 补全菜单是否显示帮助文档
 * `acm-enable-icon`: 补全菜单是否显示图标, macOS用户需要给 brew 命令增加选项 `--with-rsvg` 来安装Emacs才能显示SVG图片
 * `acm-enable-quick-access`: 是否在图标后面显示索引， 可以通过 Alt + Number 来快速选择后选词， 默认关闭
-* `acm-snippet-insert-index`: 代码模板后选词在补全菜单中的显示位置
+* `acm-snippet-insert-index`: 代码模板候选词在补全菜单中的显示位置
 * `acm-doc-frame-max-lines`: 帮助窗口的最大行数， 默认是20
+* `acm-enable-tabnine-helper`: 是否打开 tabnine 补全支持，默认关闭，打开后运行 `tabnine-bridge-install-binary` 安装 tabnine 后就可以使用了。 TabNine会消耗巨大的CPU， 导致你整个电脑都卡顿， 如果电脑性能不好， 不建议开启此选项
+* `acm-enable-yas`: yasnippet 补全，默认打开
+* `acm-backend-yas-candidates-number`: yasnippet 显示个数，默认2个 
+* `acm-enable-citre`: citre 补全，默认关闭
+* `acm-backend-citre-keyword-complete`: 根据`acm-backend-citre-keywords-alist`定义的各个模式的关键字进行补全，需要使能citre 后才生效
+
 
 ## 自定义语言服务器配置
 lsp-bridge每种语言的服务器配置存储在[lsp-bridge/langserver](https://github.com/manateelazycat/lsp-bridge/tree/master/langserver).
@@ -125,14 +135,14 @@ lsp-bridge每种语言的服务器配置存储在[lsp-bridge/langserver](https:/
 | 7 | [hls](https://github.com/haskell/haskell-language-server) | haskell | |
 | 8 | [dart-analysis-server](https://github.com/dart-lang/sdk/tree/master/pkg/analysis_server) | dart | |
 | 9 | [metals](https://scalameta.org/metals/) | scala | |
-| 10 | [typescript](https://www.npmjs.com/package/typescript) | typescript, javascript | |
+| 10 | [typescript](https://github.com/typescript-language-server/typescript-language-server) | typescript, javascript | |
 | 11 | [ocamllsp](https://github.com/ocaml/ocaml-lsp) | ocaml | |
 | 12 | [erlang-ls](https://github.com/erlang-ls/erlang_ls) | erlang | |
 | 13 | [texlab](https://github.com/latex-lsp/texlab) | latex | |
 | 14 | [eclipse.jdt.ls](https://projects.eclipse.org/projects/eclipse.jdt.ls) | java | 请确保导出 `org.eclipse.jdt.ls.product/target/repository/bin` 到你系统的PATH路径 |
-| 15 | [clojure-lsp](https://github.com/clojure-lsp/clojure-lsp) | clojure | |
+| 15 | [clojure-lsp](https://github.com/clojure-lsp/clojure-lsp) | clojure | 如果使用 `homebrew` 安装的，请确保安装的是 `clojure-lsp/brew/clojure-lsp-native` [clojure-lsp-native](https://clojure-lsp.io/installation/#homebrew-macos-and-linux) |
 | 16 | [bash-language-server](https://github.com/bash-lsp/bash-language-server) | bash | |
-| 17 | [volar](https://github.com/johnsoncodehk/volar) | vue | |
+| 17 | [volar](https://github.com/johnsoncodehk/volar) | vue | npm install typescript volar -g |
 | 18 | [sumneko](https://github.com/sumneko/lua-language-server) | lua | 请确保导出sumneko的 `bin` 目录到你系统的PATH路径 |
 | 19 | [wxml-language-server](https://github.com/chemzqm/wxml-languageserver) | wxml | |
 | 20 | [vscode-html-language-server](https://github.com/hrsh7th/vscode-langservers-extracted) | html | |
@@ -151,6 +161,10 @@ lsp-bridge每种语言的服务器配置存储在[lsp-bridge/langserver](https:/
 | 33 | [rnix-lsp](https://github.com/nix-community/rnix-lsp) | nix | |
 | 34 | [digestif](https://github.com/astoff/digestif) | latex | `lsp-bridge-tex-lsp-server` 设置成 `digestif` |
 | 35 | [rlanguageserver](https://github.com/REditorSupport/languageserver)       | R   | |
+| 36 | [graphql-lsp](https://github.com/graphql/graphiql/tree/main/packages/graphql-language-service-cli) | GraphQL | |
+| 37 | [microsoft-python-language-server](https://github.com/microsoft/python-language-server) | Python | 支持Python2的lsp |
+| 38 | [cmake-language-server](https://github.com/regen100/cmake-language-server) | cmake | `pip install cmake-language-server` |
+| 39 | [Wen](https://github.com/metaescape/Wen) | org-mode | `pip install pygls pypinyin` |
 
 ### 不会支持的特性：
 lsp-bridge的目标是实现Emacs生态中性能最快的LSP客户端, 但不是实现LSP协议最全的LSP客户端。
@@ -174,7 +188,7 @@ lsp-bridge的目标是实现Emacs生态中性能最快的LSP客户端, 但不是
 | lsp-bridge-ref.el       | 代码引用查看框架，提供引用查看、批量重命名、引用结果正则过滤等，核心代码 fork 自color-rg.el                  |
 | lsp-bridge-jdtls.el      | 提供Java语言第三方库跳转功能                                                           |
 | lsp-bridge.py           | lsp-bridge的Python主逻辑部分，提供事件循环、消息调度和状态管理                                               |
-| acm/acm.el      | 异步补全菜单， 专门为 lsp-bridge 后端而设计， 支持lsp, elisp, words等后端                                                                                           |
+| acm/acm.el      | 异步补全菜单， 专门为 lsp-bridge 后端而设计， 支持lsp, elisp, words, TabNine等后端                                                                                           |
 | core/fileaction.py      | 主要记录每个文件状态，处理LSP响应消息，调用Emacs Elisp函数                                                   |
 | core/lspserver.py       | LSP消息处理模块，主要是解析、发送和接受LSP消息，并保证LSP请求顺序符合LSP协议规范                             |
 | core/utils.py           | 一些全局工具函数，方便各模块调用                                                                             |
